@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+#ddev-generated
+
+## Description: Shared Allure server for all DDEV projects (allure-docker-service)
+## Usage: allure [start|stop|status|open|purge]
+## Example: "ddev allure start" or "ddev allure open"
+
+set -euo pipefail
+
+ALLURE_COMPOSE_FILE="${DDEV_APPROOT}/.ddev/allure/docker-compose.yaml"
+ROUTE_NAME="ddev-allure.yaml"
+ROUTE_FILE="${HOME}/.ddev/traefik/custom-global-config/${ROUTE_NAME}"
+UI_HOST="allure.ddev.site"
+API_HOST="allure-api.ddev.site"
+HTTPS_PORT="${DDEV_ROUTER_HTTPS_PORT:-443}"
+
+compose() {
+  # DDEV exports COMPOSE_PROJECT_NAME / COMPOSE_FILE for the current project:
+  # the shared server must never become part of it.
+  env -u COMPOSE_PROJECT_NAME -u COMPOSE_FILE -u COMPOSE_PROFILES \
+    docker compose -p ddev-allure -f "${ALLURE_COMPOSE_FILE}" "$@"
+}
+
+router_url() {
+  local host=$1
+  if [ "${HTTPS_PORT}" = "443" ]; then echo "https://${host}"; else echo "https://${host}:${HTTPS_PORT}"; fi
+}
+
+write_route() {
+  mkdir -p "$(dirname "${ROUTE_FILE}")"
+  # User-managed global dynamic Traefik config: DDEV copies it to the router
+  # on every `ddev start`; written by `ddev allure start`.
+  cat > "${ROUTE_FILE}" <<YAML
+# Managed by 'ddev allure' (ddev-allure add-on).
+http:
+  routers:
+    ddev-allure-ui:
+      rule: "Host(\`${UI_HOST}\`)"
+      entrypoints: ["http-${HTTPS_PORT}"]
+      service: ddev-allure-ui
+      tls: {}
+    ddev-allure-api:
+      rule: "Host(\`${API_HOST}\`)"
+      entrypoints: ["http-${HTTPS_PORT}"]
+      service: ddev-allure-api
+      tls: {}
+  services:
+    ddev-allure-ui:
+      loadBalancer:
+        servers:
+          - url: "http://ddev-allure-ui:5252"
+    ddev-allure-api:
+      loadBalancer:
+        servers:
+          - url: "http://ddev-allure:5050"
+YAML
+  # Load it right away; Traefik watches this directory.
+  if docker ps --format '{{.Names}}' | grep -qx ddev-router; then
+    docker cp "${ROUTE_FILE}" "ddev-router:/mnt/ddev-global-cache/traefik/config/${ROUTE_NAME}" >/dev/null
+  fi
+}
+
+remove_route() {
+  rm -f "${ROUTE_FILE}"
+  if docker ps --format '{{.Names}}' | grep -qx ddev-router; then
+    docker exec ddev-router rm -f "/mnt/ddev-global-cache/traefik/config/${ROUTE_NAME}" || true
+  fi
+}
+
+case "${1:-status}" in
+  start)
+    docker network inspect ddev_default >/dev/null 2>&1 || docker network create ddev_default >/dev/null
+    compose up -d
+    write_route
+    echo "Allure UI:  $(router_url "${UI_HOST}")  (or http://localhost:5252)"
+    echo "Allure API: $(router_url "${API_HOST}")  (or http://localhost:5050)"
+    echo "From DDEV containers push to: http://ddev-allure:5050"
+    ;;
+  stop)
+    compose down
+    remove_route
+    ;;
+  status)
+    compose ps
+    ;;
+  open)
+    url="$(router_url "${UI_HOST}")"
+    if command -v xdg-open >/dev/null 2>&1; then xdg-open "${url}"; elif command -v open >/dev/null 2>&1; then open "${url}"; else echo "${url}"; fi
+    ;;
+  purge)
+    compose down --volumes
+    remove_route
+    ;;
+  *)
+    echo "Usage: ddev allure [start|stop|status|open|purge]" >&2
+    exit 1
+    ;;
+esac

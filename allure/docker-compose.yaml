@@ -1,0 +1,44 @@
+#ddev-generated
+# Shared Allure server for all DDEV projects (compose project "ddev-allure").
+# Started / stopped by `ddev allure start|stop`, not by `ddev start`.
+name: ddev-allure
+
+services:
+  allure:
+    image: frankescobar/allure-docker-service:2.44.0
+    container_name: ddev-allure
+    restart: unless-stopped
+    environment:
+      CHECK_RESULTS_EVERY_SECONDS: "NONE"
+      KEEP_HISTORY: 1
+      KEEP_HISTORY_LATEST: ${ALLURE_KEEP_HISTORY_LATEST:-25}
+      TZ: ${TZ:-Europe/Zurich}
+    volumes:
+      - ddev-allure-projects:/app/projects
+    ports:
+      - "127.0.0.1:${ALLURE_API_PORT:-5050}:5050"
+    networks:
+      - ddev_default
+
+  allure-ui:
+    image: frankescobar/allure-docker-service-ui:7.0.3
+    container_name: ddev-allure-ui
+    restart: unless-stopped
+    environment:
+      # The UI calls the API from the browser.
+      ALLURE_DOCKER_PUBLIC_API_URL: ${ALLURE_PUBLIC_API_URL:-http://localhost:5050}
+      ALLURE_DOCKER_PUBLIC_API_URL_PREFIX: ""
+    ports:
+      - "127.0.0.1:${ALLURE_UI_PORT:-5252}:5252"
+    networks:
+      - ddev_default
+    depends_on:
+      - allure
+
+volumes:
+  ddev-allure-projects:
+    name: ddev-allure-projects
+
+networks:
+  ddev_default:
+    external: true
