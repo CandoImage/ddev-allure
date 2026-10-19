@@ -7,7 +7,7 @@ and its UI. Test runs push their results; every project gets its own Allure proj
 ## Install
 
 ```bash
-ddev add-on get <owner>/ddev-allure   # in any project that runs tests
+ddev add-on get CandoImage/ddev-allure   # in any project that runs tests
 ddev allure start
 ```
 
